@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Neon Runner</title>
+    <script src="https://telegram.org/js/games.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: #000;
+        }
+        body {
+            font-family: 'Courier New', monospace;
+            touch-action: none;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+        #gameCanvas {
+            display: block;
+            background: linear-gradient(180deg, #0a0a0a 0%, #1a0a2e 50%, #0f0518 100%);
+        }
+        #ui {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            right: 20px;
+            display: flex;
+            justify-content: space-between;
+            font-size: 18px;
+            color: #0ff;
+            text-shadow: 0 0 10px #0ff, 0 0 20px #0ff;
+            pointer-events: none;
+            z-index: 10;
+        }
+        #startScreen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            background: rgba(0,0,0,0.85);
+            z-index: 100;
+        }
+        #startScreen h1 {
+            font-size: 48px;
+            color: #0ff;
+            text-shadow: 0 0 20px #0ff, 0 0 40px #0ff;
+            margin-bottom: 20px;
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+        #startScreen p {
+            color: #888;
+            margin-bottom: 40px;
+            font-size: 16px;
+        }
+        .btn {
+            background: linear-gradient(135deg, #0ff 0%, #0088ff 100%);
+            color: #000;
+            border: none;
+            padding: 20px 60px;
+            font-size: 24px;
+            font-family: 'Courier New', monospace;
+            font-weight: bold;
+            cursor: pointer;
+            border-radius: 5px;
+            box-shadow: 0 0 20px #0ff;
+            transition: all 0.3s;
+        }
+        .btn:hover, .btn:active {
+            transform: scale(1.05);
+            box-shadow: 0 0 40px #0ff;
+        }
+        #gameOver {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: none;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            background: rgba(0,0,0,0.9);
+            z-index: 100;
+        }
+        #gameOver h1 {
+            color: #ff0080;
+            font-size: 48px;
+            text-shadow: 0 0 20px #ff0080;
+            margin-bottom: 20px;
+        }
+        #gameOver p {
+            color: #fff;
+            font-size: 20px;
+            margin: 10px;
+        }
+        #gameOver .score {
+            color: #0ff;
+            font-size: 36px;
+            margin: 20px;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas"></canvas>
+    
+    <div id="ui">
+        <span>SCORE: <span id="score">0</span></span>
+        <span>LEVEL: <span id="level">1</span></span>
+    </div>
+    
+    <div id="startScreen">
+        <h1>🏃 NEON RUNNER</h1>
+        <p>Cyberpunk Endless Runner</p>
+        <button class="btn" onclick="startGame()">▶ TAP TO START</button>
+    </div>
+    
+    <div id="gameOver">
+        <h1>GAME OVER</h1>
+        <p>Score: <span class="score" id="finalScore">0</span></p>
+        <p>High Score: <span id="highScore">0</span></p>
+        <button class="btn" onclick="restartGame()" style="margin-top: 30px;">↻ PLAY AGAIN</button>
+    </div>
+
+    <script>
+        // Game constants
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        // Resize canvas to fill screen
+        function resize() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+        resize();
+        window.addEventListener('resize', resize);
+        
+        // Game state
+        let gameState = 'start'; // start, playing, gameover
+        let score = 0;
+        let level = 1;
+        let frame = 0;
+        let speed = 5;
+        
+        // Player
+        const player = {
+            x: 100,
+            y: 0,
+            width: 40,
+            height: 60,
+            dy: 0,
+            jumpPower: -15,
+            grounded: false,
+            color: '#0ff'
+        };
+        
+        // Ground level
+        let groundY = canvas.height - 100;
+        
+        // Obstacles
+        let obstacles = [];
+        let particles = [];
+        
+        // High score
+        let highScore = localStorage.getItem('neonRunner_highScore') || 0;
+        
+        // Initialize player position
+        player.y = groundY - player.height;
+        
+        // Input handling
+        function jump() {
+            if (gameState !== 'playing') return;
+            if (player.grounded) {
+                player.dy = player.jumpPower;
+                player.grounded = false;
+                createParticles(player.x + player.width/2, player.y + player.height, '#0ff', 8);
+            }
+        }
+        
+        // Touch/click handlers
+        document.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            if (gameState === 'start') startGame();
+            else if (gameState === 'playing') jump();
+            else if (gameState === 'gameover') restartGame();
+        }, {passive: false});
+        
+        document.addEventListener('mousedown', () => {
+            if (gameState === 'start') startGame();
+            else if (gameState === 'playing') jump();
+            else if (gameState === 'gameover') restartGame();
+        });
+        
+        document.addEventListener('keydown', (e) => {
+            if (e.code === 'Space' || e.code === 'ArrowUp') {
+                e.preventDefault();
+                if (gameState === 'start') startGame();
+                else if (gameState === 'playing') jump();
+                else if (gameState === 'gameover') restartGame();
+            }
+        });
+        
+        function createParticles(x, y, color, count) {
+            for (let i = 0; i < count; i++) {
+                particles.push({
+                    x: x,
+                    y: y,
+                    vx: (Math.random() - 0.5) * 10,
+                    vy: (Math.random() - 0.5) * 10,
+                    life: 30,
+                    color: color,
+                    size: Math.random() * 4 + 2
+                });
+            }
+        }
+        
+        function updatePlayer() {
+            // Gravity
+            player.dy += 0.8;
+            player.y += player.dy;
+            
+            // Ground collision
+            groundY = canvas.height - 100;
+            if (player.y >= groundY - player.height) {
+                player.y = groundY - player.height;
+                player.dy = 0;
+                player.grounded = true;
+            }
+        }
+        
+        function updateObstacles() {
+            // Spawn obstacles
+            if (frame % Math.max(60, 150 - level * 10) === 0) {
+                const type = Math.random() > 0.5 ? 'spike' : 'drone';
+                obstacles.push({
+                    x: canvas.width,
+                    y: type === 'spike' ? groundY - 40 : groundY - 120,
+                    width: type === 'spike' ? 30 : 50,
+                    height: type === 'spike' ? 40 : 40,
+                    type: type,
+                    passed: false
+                });
+            }
+            
+            // Update and check collisions
+            for (let i = obstacles.length - 1; i >= 0; i--) {
+                let obs = obstacles[i];
+                obs.x -= speed;
+                
+                // Score for passing
+                if (!obs.passed && obs.x + obs.width < player.x) {
+                    obs.passed = true;
+                    score += 10;
+                    if (score % 100 === 0) {
+                        level++;
+                        speed += 0.5;
+                        createParticles(canvas.width/2, canvas.height/2, '#ff0', 15);
+                    }
+                }
+                
+                // Remove off-screen
+                if (obs.x + obs.width < 0) {
+                    obstacles.splice(i, 1);
+                    continue;
+                }
+                
+                // Collision detection
+                if (player.x < obs.x + obs.width &&
+                    player.x + player.width > obs.x &&
+                    player.y < obs.y + obs.height &&
+                    player.y + player.height > obs.y) {
+                    gameOver();
+                }
+            }
+        }
+        
+        function updateParticles() {
+            for (let i = particles.length - 1; i >= 0; i--) {
+                let p = particles[i];
+                p.x += p.vx;
+                p.y += p.vy;
+                p.life--;
+                if (p.life <= 0) particles.splice(i, 1);
+            }
+        }
+        
+        function drawPlayer() {
+            // Glow effect
+            ctx.shadowBlur = 30;
+            ctx.shadowColor = player.color;
+            
+            // Body
+            ctx.fillStyle = player.color;
+            ctx.fillRect(player.x, player.y, player.width, player.height);
+            
+            // Inner core
+            ctx.fillStyle = '#fff';
+            ctx.fillRect(player.x + 8, player.y + 8, player.width - 16, player.height - 16);
+            
+            ctx.shadowBlur = 0;
+        }
+        
+        function drawObstacles() {
+            ctx.shadowBlur = 20;
+            ctx.shadowColor = '#ff0080';
+            
+            obstacles.forEach(obs => {
+                ctx.fillStyle = '#ff0080';
+                
+                if (obs.type === 'spike') {
+                    // Draw spike
+                    ctx.beginPath();
+                    ctx.moveTo(obs.x, obs.y + obs.height);
+                    ctx.lineTo(obs.x + obs.width/2, obs.y);
+                    ctx.lineTo(obs.x + obs.width, obs.y + obs.height);
+                    ctx.closePath();
+                    ctx.fill();
+                } else {
+                    // Draw drone
+                    ctx.fillRect(obs.x, obs.y, obs.width, obs.height);
+                    // Drone light
+                    ctx.fillStyle = '#ff0';
+                    ctx.shadowColor = '#ff0';
+                    ctx.beginPath();
+                    ctx.arc(obs.x + obs.width/2, obs.y + obs.height/2, 8, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.fillStyle = '#ff0080';
+                    ctx.shadowColor = '#ff0080';
+                }
+            });
+            
+            ctx.shadowBlur = 0;
+        }
+        
+        function drawParticles() {
+            particles.forEach(p => {
+                ctx.globalAlpha = p.life / 30;
+                ctx.fillStyle = p.color;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+                ctx.fill();
+            });
+            ctx.globalAlpha = 1;
+        }
+        
+        function drawBackground() {
+            // Clear with slight trail effect
+            ctx.fillStyle = 'rgba(10, 10, 10, 0.3)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Moving grid lines
+            ctx.strokeStyle = 'rgba(0, 255, 255, 0.1)';
+            ctx.lineWidth = 1;
+            const offset = (frame * 2) % 50;
+            for (let x = -offset; x < canvas.width; x += 50) {
+                ctx.beginPath();
+                ctx.moveTo(x, 0);
+                ctx.lineTo(x - 100, canvas.height);
+                ctx.stroke();
+            }
+            
+            // Ground
+            groundY = canvas.height - 100;
+            ctx.fillStyle = '#1a1a2e';
+            ctx.fillRect(0, groundY, canvas.width, 100);
+            
+            // Ground neon line
+            ctx.strokeStyle = '#0ff';
+            ctx.lineWidth = 3;
+            ctx.shadowBlur = 20;
+            ctx.shadowColor = '#0ff';
+            ctx.beginPath();
+            ctx.moveTo(0, groundY);
+            ctx.lineTo(canvas.width, groundY);
+            ctx.stroke();
+            ctx.shadowBlur = 0;
+        }
+        
+        function updateUI() {
+            document.getElementById('score').textContent = score;
+            document.getElementById('level').textContent = level;
+        }
+        
+        function gameLoop() {
+            if (gameState === 'playing') {
+                frame++;
+                updatePlayer();
+                updateObstacles();
+                updateParticles();
+                updateUI();
+            }
+            
+            drawBackground();
+            drawObstacles();
+            drawPlayer();
+            drawParticles();
+            
+            requestAnimationFrame(gameLoop);
+        }
+        
+        function startGame() {
+            gameState = 'playing';
+            document.getElementById('startScreen').style.display = 'none';
+            document.getElementById('gameOver').style.display = 'none';
+        }
+        
+        function gameOver() {
+            gameState = 'gameover';
+            createParticles(player.x, player.y, '#f00', 30);
+            
+            if (score > highScore) {
+                highScore = score;
+                localStorage.setItem('neonRunner_highScore', highScore);
+            }
+            
+            document.getElementById('finalScore').textContent = score;
+            document.getElementById('highScore').textContent = highScore;
+            document.getElementById('gameOver').style.display = 'flex';
+            
+            // Share score if in Telegram
+            if (window.TelegramGameProxy) {
+                TelegramGameProxy.shareScore(score);
+            }
+        }
+        
+        function restartGame() {
+            score = 0;
+            level = 1;
+            speed = 5;
+            frame = 0;
+            obstacles = [];
+            particles = [];
+            player.y = groundY - player.height;
+            player.dy = 0;
+            player.grounded = false;
+            
+            document.getElementById('gameOver').style.display = 'none';
+            gameState = 'playing';
+        }
+        
+        // Start the game loop
+        gameLoop();
+    </script>
+</body>
+</html>
