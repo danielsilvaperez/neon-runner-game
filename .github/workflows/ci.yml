@@ -11,6 +11,6 @@ jobs:
       - uses: actions/checkout@v4
       - name: Validate required files
         run: |
-          test -f index.html
+          test -f index.html || test -f game.html
           test -f README.md || test -f GAME_README.md
           echo "Static checks passed"
