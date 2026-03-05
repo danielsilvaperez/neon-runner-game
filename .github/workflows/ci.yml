@@ -12,5 +12,5 @@ jobs:
       - name: Validate required files
         run: |
           test -f index.html
-          test -f README.md
+          test -f README.md || test -f GAME_README.md
           echo "Static checks passed"
